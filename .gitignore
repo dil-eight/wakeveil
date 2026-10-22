@@ -1,0 +1,102 @@
+# ------------------------------------------------------------------
+# AI / agent tooling — local only, never committed
+# ------------------------------------------------------------------
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.mcp.json
+AGENTS.md
+.agents/
+.specify/
+skills-lock.json
+.cursor/
+.cursorrules
+.cursorignore
+.cursorindexingignore
+.windsurf/
+.windsurfrules
+.codex/
+.gemini/
+GEMINI.md
+.aider*
+.continue/
+.roo/
+.clinerules
+.kiro/
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+.github/chatmodes/
+
+# ------------------------------------------------------------------
+# macOS
+# ------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# ------------------------------------------------------------------
+# Xcode / Swift
+# ------------------------------------------------------------------
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+build/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+*.xcresult
+timeline.xctimeline
+playground.xcworkspace
+.build/
+.swiftpm/
+
+# ------------------------------------------------------------------
+# Go
+# ------------------------------------------------------------------
+/relay/bin/
+*.test
+*.out
+coverage.*
+go.work.sum
+
+# ------------------------------------------------------------------
+# Runtime data
+# ------------------------------------------------------------------
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# ------------------------------------------------------------------
+# Secrets & signing material
+# ------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.p8
+*.p12
+*.pem
+*.key
+*.cer
+*.mobileprovision
+*.provisionprofile
+
+# ------------------------------------------------------------------
+# Editors
+# ------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
