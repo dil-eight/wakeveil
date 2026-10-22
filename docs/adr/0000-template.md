@@ -2,7 +2,7 @@
 
 - **Status:** Proposed | Accepted | Superseded by [NNNN](NNNN-title.md)
 - **Date:** YYYY-MM-DD
-- **Milestone:** 1–5
+- **Spec step:** 1–10 ([§15](../spec.md#15-implementation-order))
 
 ## Context
 
@@ -19,7 +19,7 @@ What we chose and why.
 
 ## Security impact
 
-Effect on the threat model ([`spec.md` §10](../spec.md#10-security-threat-model)), key material, and local password access.
+Effect on the security model ([`spec.md` §14](../spec.md#14-security-model)), key material and signing contexts, the local IPC boundary, and ordinary password unlock.
 
 ## Consequences
 
