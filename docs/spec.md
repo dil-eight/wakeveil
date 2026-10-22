@@ -4,7 +4,7 @@
 
 Build a native iOS + macOS application that allows a user to remotely unlock their personal Mac from an iPhone over the internet.
 
-**Primary use case:** the user is at work with their iPhone. Their personal Mac is at home, connected to the internet, and currently locked. The user opens the iPhone app, authenticates with Face ID, taps **Unlock**, and the home Mac unlocks its existing macOS user session.
+**Primary use case:** the user is at work with their iPhone. Their personal Mac is at home, connected to the internet, and currently locked. The user opens the iPhone app, authenticates with Face ID (Touch ID on iPhone Duo), taps **Unlock**, and the home Mac unlocks its existing macOS user session.
 
 No Bluetooth, shared Wi-Fi network, physical proximity, remote desktop interaction, or manual password entry should be required for the successful remote-unlock flow.
 
@@ -56,7 +56,7 @@ No Bluetooth, shared Wi-Fi network, physical proximity, remote desktop interacti
 ```text
 iPhone
   |
-  | Face ID authentication
+  | Face ID / Touch ID authentication
   |
   | Signed unlock request
   v
@@ -197,7 +197,7 @@ Use a canonical binary encoding or canonical serialization for the exact signed 
 
 ### Security
 
-- Require fresh Face ID authentication before each unlock.
+- Require fresh biometric authentication (Face ID, or Touch ID on iPhone Duo) before each unlock.
 - Use a Secure Enclave-backed private key when supported.
 - Use a cryptographic challenge-response protocol.
 - Bind requests to the paired Mac identity.
@@ -209,7 +209,7 @@ Use a canonical binary encoding or canonical serialization for the exact signed 
 - Rate-limit requests.
 - Maintain an auditable unlock-attempt history.
 
-Successful Face ID authentication only authorizes access to the device's signing key. The Mac must independently verify the cryptographic authorization.
+Successful biometric authentication only authorizes access to the device's signing key. The Mac must independently verify the cryptographic authorization.
 
 ### Response
 
@@ -282,6 +282,13 @@ No unlock request may be automatically replayed after expiration or after a reco
 
 ## 7. iPhone Application
 
+### Supported devices
+
+- iPhone models with Face ID.
+- iPhone Duo, folded (outer display) and unfolded (inner display), with Touch ID in the side button.
+
+Layouts adapt by size class; the app must keep its state when iPhone Duo is folded or unfolded mid-flow. UI design: [`design.md`](design.md).
+
 ### Main screen
 
 Minimal interface:
@@ -298,7 +305,7 @@ Last unlock: 10:42 AM
 ### Unlock interaction
 
 1. Tap **Unlock**.
-2. Perform Face ID authentication.
+2. Perform biometric authentication (Face ID or Touch ID).
 3. Obtain a fresh challenge.
 4. Sign the authorization request.
 5. Send it through the relay.
@@ -314,7 +321,7 @@ Last unlock: 10:42 AM
 - Unlock history.
 - Security settings.
 
-Support Touch ID and device passcode fallback only if explicitly permitted by the application's security policy.
+Touch ID is the primary biometric on iPhone Duo, which has no Face ID. Device passcode fallback is supported only if explicitly permitted by the application's security policy.
 
 ## 8. Backend
 
@@ -458,7 +465,7 @@ Run physical-device validation before claiming success.
 
 - Build SwiftUI screens.
 - Implement QR pairing.
-- Implement Face ID authorization.
+- Implement Face ID / Touch ID authorization.
 - Implement signed unlock requests.
 - Implement status updates.
 
@@ -487,7 +494,7 @@ The MVP is complete only when:
 - [ ] iPhone and Mac work from different networks.
 - [ ] No Bluetooth connection is involved.
 - [ ] The Mac does not require an open inbound router port.
-- [ ] The iPhone user authenticates with Face ID.
+- [ ] The iPhone user authenticates with Face ID (Touch ID on iPhone Duo).
 - [ ] The remote command is cryptographically authenticated.
 - [ ] The relay cannot forge an authorized unlock.
 - [ ] The actual macOS lock screen is dismissed.

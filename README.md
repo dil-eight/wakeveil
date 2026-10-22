@@ -1,6 +1,6 @@
 # Wakeveil
 
-Remotely unlock your locked Mac from your iPhone, over the internet, with Face ID.
+Remotely unlock your locked Mac from your iPhone, over the internet, with Face ID or Touch ID. Works on iPhone and iPhone Duo.
 
 Wakeveil is a native iOS + macOS app with a minimal Go relay. The iPhone signs every unlock request with a Secure Enclave key, the relay only routes messages, and the Mac verifies the signature itself before completing a legitimate macOS screen-unlock transaction. No password ever leaves the Mac, and the standard password unlock always keeps working.
 
@@ -10,20 +10,21 @@ Wakeveil is a native iOS + macOS app with a minimal Go relay. The iPhone signs e
 ## How it works
 
 ```text
-iPhone ──Face ID──▶ signed request ──▶ Relay (Go) ──WSS──▶ Mac agent ──▶ macOS authorization ──▶ session unlocked
+iPhone ──Face ID / Touch ID──▶ signed request ──▶ Relay (Go) ──WSS──▶ Mac agent ──▶ macOS authorization ──▶ session unlocked
 ```
 
-- **iPhone app** — SwiftUI, LocalAuthentication, CryptoKit, Secure Enclave.
+- **iPhone app** — SwiftUI, LocalAuthentication, CryptoKit, Secure Enclave. Adaptive layout for iPhone Duo (folded and unfolded).
 - **Mac app + agent** — SwiftUI, background agent, Security.framework, optional Authorization Plugin.
 - **Relay** — Go, HTTPS/WebSocket, Docker. Routes commands; cannot forge them.
 
-The full specification is in [`docs/spec.md`](docs/spec.md).
+The full specification is in [`docs/spec.md`](docs/spec.md); UI design is in [`docs/design.md`](docs/design.md).
 
 ## Repository layout
 
 | Path | Contents | Milestone |
 | --- | --- | --- |
 | [`docs/spec.md`](docs/spec.md) | Implementation specification | — |
+| [`docs/design.md`](docs/design.md) | UI and interaction design (iPhone, iPhone Duo, Mac) | 3, 4 |
 | [`docs/feasibility.md`](docs/feasibility.md) | Phase 0 research, findings, GO / NO-GO | 1 |
 | [`docs/adr/`](docs/adr/) | Architecture decision records | all |
 | [`poc/macos-unlock/`](poc/macos-unlock/) | Isolated local screen-unlock prototype | 1 |
@@ -36,7 +37,7 @@ The full specification is in [`docs/spec.md`](docs/spec.md).
 
 1. **Feasibility** — research macOS authorization, prove a real screen unlock locally, decide GO / NO-GO.
 2. **Secure device communication** — Mac agent, device identity, signing, Go relay.
-3. **iOS application** — SwiftUI screens, QR pairing, Face ID, signed requests.
+3. **iOS application** — SwiftUI screens, QR pairing, Face ID / Touch ID, signed requests, iPhone Duo layouts.
 4. **System integration** — wire the relay command to the proven unlock mechanism, install approval, rollback.
 5. **Production hardening** — security review, observability, signing and notarization, compatibility matrix.
 
