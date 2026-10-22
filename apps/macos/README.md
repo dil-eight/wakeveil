@@ -1,5 +1,11 @@
-# macOS app and agent
+# macOS agent and authorization component
 
-SwiftUI app plus background agent. The agent keeps an outbound connection to the relay, verifies incoming signed requests (signature, nonce, freshness, pairing) and hands verified requests to the authorization component proven in Phase 0.
+- **Agent:**
+  - BLE pairing (Add iPhone) and trusted-device storage;
+  - routing grants and routing generation;
+  - the outbound WebSocket to the relay;
+  - signed challenges, with in-memory, atomically consumed state;
+  - session status and the Mac UI.
+- **Authorization component:** minimal and privileged. It integrates with the system unlock mechanism validated in the first milestone. No networking and no untrusted parsing; it accepts requests only from the authenticated agent over local IPC.
 
-**Milestones 2 and 4** — not started. See [`docs/spec.md` §6](../../docs/spec.md#6-macos-application).
+Not started (spec steps 3–8). See [`docs/spec.md` §2–§7](../../docs/spec.md#2-architecture) and [`docs/design.md` §7](../../docs/design.md#7-mac-app).

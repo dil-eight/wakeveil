@@ -1,111 +1,116 @@
-# Phase 0 — macOS Unlock Feasibility
+# First Milestone — macOS Unlock Feasibility Report
 
 | | |
 | --- | --- |
 | **Status** | Not started |
 | **Recommendation** | _pending_ — GO / NO-GO |
-| **Target macOS** | 26, 27 |
+| **Declared macOS version** | _e.g. macOS 27.0 (build), Apple silicon_ |
 | **Test environment** | _disposable VM / spare Mac — fill in_ |
 | **Last updated** | _YYYY-MM-DD_ |
 
-> Only a real, verified unlock of an already-logged-in, locked graphical session counts.
-> Screen wake, screensaver dismissal, synthetic keyboard input, or authenticating inside our own app do **not**.
+> Goal ([spec §1](spec.md#1-first-milestone-validate-macos-unlocking)): unlock an existing, locked macOS user session on an awake Mac without storing or submitting the account password.
+> Screen wake, screensaver dismissal, synthetic keyboard input, a fake lock screen, or authenticating inside our own app do **not** count.
 
-## 1. Question
+## 1. Summary for the report
 
-Is there a supported, reliable mechanism that lets a background component on the Mac complete a screen-unlock transaction for the existing user session, without the user's password being typed or transmitted?
+The spec's *First Action* asks for exactly these five items:
+
+| Item | Answer |
+| --- | --- |
+| Supported macOS version | _TBD_ |
+| Tested mechanism | _TBD_ |
+| Observed limitations | _TBD_ |
+| Recovery procedure | _TBD_ — see §6 |
+| Evidence that ordinary password unlock still works | _TBD_ — see §5 |
 
 ## 2. Scope
 
-| # | Scenario | In MVP |
-| --- | --- | --- |
-| 1 | Authenticating inside the application | No (baseline only) |
-| 2 | Unlocking an existing, locked macOS graphical session | **Yes** |
-| 3 | Logging into macOS after a reboot | No |
-| 4 | Unlocking a FileVault-protected startup volume | No |
+| Scenario | In MVP |
+| --- | --- |
+| Awake Mac, existing locked user session | **Yes** |
+| Waking a sleeping Mac over the internet | No |
+| FileVault preboot unlock | No |
+| Initial login after restart | No |
 
-## 3. Research findings
+## 3. Research
 
-For each item: what Apple documents, what was observed, and the source.
+Current Apple documentation only. Don't assume a general-purpose unlock API exists.
 
-### 3.1 Authorization Services
+### 3.1 Authorization plug-in mechanism
 
-_TBD_
+_TBD_ — `AuthorizationPlugin` / mechanisms, SecurityAgent lifecycle, privileged vs non-privileged mechanisms, which rules govern screen unlock (`system.login.screensaver` and whatever it delegates to on the declared version).
 
-### 3.2 `Security.AuthorizationPlugin` and SecurityAgent plugin lifecycle
+### 3.2 Rule configuration and the standard path
 
-_TBD_
+_TBD_ — the current rule definition (`security authorizationdb read …`). How a Wakeveil mechanism can be added **without** removing or weakening the password mechanism.
 
-### 3.3 `system.login.screensaver` rule
+### 3.3 Failure behaviour
 
-_TBD_ — current rule definition (`security authorizationdb read system.login.screensaver`), mechanisms, and how it changed across macOS versions.
+_TBD_ — what the system does when the plug-in is missing, can't reach the agent, times out or crashes. It must fall back to ordinary password unlock.
 
-### 3.4 `SFAuthorizationPluginView`
+### 3.4 Local IPC boundary
 
-_TBD_
+_TBD_ — how the authorization component authenticates the agent (code-signing requirement, XPC peer validation), so that an unrelated local process can't authorize unlocking ([spec §2](spec.md#2-architecture)).
 
-### 3.5 Screen-unlock policy configuration
+### 3.5 Session-state detection
 
-_TBD_
+_TBD_ — a reliable locked / unlocked signal on the declared version ([spec §9](spec.md#9-device-status)). Display sleep, screensaver activity and an inactive session are not substitutes. When does it have to report `unknown`?
 
-### 3.6 FileVault restrictions
+### 3.6 FileVault, Fast User Switching, multiple users
 
-_TBD_
-
-### 3.7 Fast User Switching and multiple users
-
-_TBD_
-
-### 3.8 Sleep and wake behavior
-
-_TBD_
-
-### 3.9 Process lifecycle while locked
-
-_TBD_ — which of LaunchAgent / LaunchDaemon / plugin stays alive and reachable at the lock screen.
-
-### 3.10 Credential fallback (only if passwordless is infeasible)
-
-_TBD_ — can a Keychain item be read while the session is locked, and is there a supported path to hand it to the system?
+_TBD_ — which configurations are unsupported, and how the app detects and reports them.
 
 ## 4. Proof of concept
 
 Code: [`poc/macos-unlock/`](../poc/macos-unlock/)
 
-- **Approach:** _TBD_
-- **How the unlock was verified (system signal):** _TBD_
-- **Result:** _TBD_
-- **Evidence:** _logs, screen recordings, `log show` excerpts_
+- **Mechanism:** _TBD_
+- **Trigger used in the PoC:** _local only; no networking_
+- **How "session actually unlocked" was confirmed:** _TBD (system signal, not UI observation)_
+- **Repeated lock/unlock cycles:** _N cycles, results_
+- **Evidence:** _logs (`log show` excerpts), screen recordings_
 
-## 5. Compatibility matrix
+## 5. Ordinary unlock preserved
 
-| macOS | Build | Apple silicon / Intel | FileVault | Result | Notes |
+Each case is tested on the declared version.
+
+| Case | Password unlock works? | Evidence |
+| --- | --- | --- |
+| Wakeveil installed, idle | | |
+| Agent not running | | |
+| Agent unreachable / hung | | |
+| Authorization component crashes | | |
+| Component removed (uninstalled) | | |
+| Repeated remote unlocks, then password unlock | | |
+| Restart → normal login | | |
+
+## 6. Installation, removal, recovery
+
+- **Install** (requires explicit administrator authorization): _steps; what is changed; backup of the original rule_
+- **Uninstall:** _steps; how the original rule is restored; verification_
+- **Recovery** if the lock screen misbehaves: _e.g. SSH, a second admin account, Recovery OS; exact commands_
+
+Scripts: [`scripts/`](../scripts/)
+
+## 7. Compatibility
+
+| macOS | Build | Chip | FileVault | Result | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 26.x | | | | | |
-| 27.x | | | | | |
+| | | | | | |
 
-## 6. Safety and recovery
-
-- Backup of the original authorization rule: _TBD_
-- Install procedure (requires explicit admin approval): _TBD_
-- Uninstall procedure: _TBD_
-- Emergency recovery (e.g. SSH, Recovery OS, second admin account): _TBD_
-
-Recovery is verified by the system tests in [`spec.md` §11](spec.md#11-tests).
-
-## 7. Risks
+## 8. Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| macOS update changes authorization behavior | | | |
-| Broken plugin blocks the lock screen | | | |
-| | | | |
+| macOS update changes authorization behaviour | | | |
+| Broken component affects the lock screen | | | |
+| Session-state signal unreliable | | | |
 
-## 8. Recommendation
+## 9. Recommendation
 
 **GO / NO-GO:** _pending_
 
-_Reasoning, blockers with evidence, and the simplest viable alternative if NO-GO._
+_Reasoning. If NO-GO: the exact blocker, the evidence, and the simplest viable alternative. The rest of the product does not start._
 
 ## References
 

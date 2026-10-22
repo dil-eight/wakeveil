@@ -1,23 +1,25 @@
 # Design
 
-UI and interaction design for the iPhone app (including **iPhone Duo**) and the Mac app. Behaviour and security rules come from [`spec.md`](spec.md); this document only describes how they look and feel.
+UI and interaction design for the iPhone app (including **iPhone Duo**) and the Mac app. Behaviour and security rules come from [`spec.md`](spec.md); this document only describes how they look and feel. Where the two disagree, the spec wins.
 
 ## 1. Principles
 
-1. **One action.** The app exists to unlock one Mac. The Unlock button is the only prominent control on the home screen.
-2. **Honest status.** Show "Unlocked" only after the Mac reports `unlocked`, which it does only after verifying the session is actually unlocked. Never show optimistic success. While waiting, say what is actually happening.
-3. **No silent retries.** A failed, expired or unconfirmed request is never resent automatically. Trying again means a new request and a new biometric check.
-4. **System first.** Use stock SwiftUI components, SF Symbols, Dynamic Type and system colors so Liquid Glass, Dark Mode, accessibility and new form factors work without custom code.
-5. **Biometry-agnostic.** Never hard-code "Face ID". Read `LAContext.biometryType` and use the matching name, symbol and copy. iPhone Duo has Touch ID only.
+1. **One action.** The app exists to unlock a Mac. On a Mac's screen, Unlock is the only prominent control.
+2. **Honest status.** Success is shown only for a verified, signed result confirming the unlock ([spec §10](spec.md#10-results-and-failure-handling)). A sent request, an accepted authorization or a later "unlocked" status is not success. When the outcome is not known, say so.
+3. **Connectivity and session are separate.** "Online" never implies "Locked" or "Unlocked". Never show stale session state as current ([spec §9](spec.md#9-device-status)).
+4. **No silent retries.** Every attempt needs a fresh challenge and a new explicit tap plus system authentication. Nothing is resent after a timeout, a reconnect or a fold.
+5. **Pairing happens in person.** Adding a device is always local, over Bluetooth, confirmed on both screens. No UI offers remote pairing.
+6. **System first.** Use stock SwiftUI components, SF Symbols, Dynamic Type and system colors, so Liquid Glass, Dark Mode, accessibility and new form factors work without custom code.
+7. **Authentication-agnostic.** Never hard-code "Face ID". Copy and symbols follow `LAContext.biometryType` and the selected policy: Face ID, Touch ID, or device passcode. iPhone Duo has Touch ID only.
 
 ## 2. Supported devices
 
-| Device | Biometry | Layouts |
+| Device | User authentication | Layouts |
 | --- | --- | --- |
-| iPhone (Face ID models) | Face ID | Compact |
-| **iPhone Duo**, folded (outer display) | Touch ID, side button | Compact |
-| **iPhone Duo**, unfolded (inner display) | Touch ID, side button | Regular width (two panes); compact when sharing the screen with another app |
-| Mac | Touch ID / password, for local confirmations only | Window with sidebar |
+| iPhone (Face ID models) | Face ID / passcode per policy | Compact |
+| **iPhone Duo**, folded (outer display) | Touch ID (side button) / passcode per policy | Compact |
+| **iPhone Duo**, unfolded (inner display) | Touch ID (side button) / passcode per policy | Regular width (two columns); compact when sharing the screen with another app |
+| Mac | — (pairing confirmations happen on the unlocked Mac) | Window with sidebar |
 
 iPhone Duo displays (from Apple's spec page): outer 5.4", 1398 × 2034 px; inner 7.6", 1878 × 2670 px. Both are 120 Hz with Always-On. Never branch on these numbers. Lay out by size class and the space you are given.
 
@@ -25,19 +27,19 @@ iPhone Duo displays (from Apple's spec page): outer 5.4", 1398 × 2034 px; inner
 
 ### Color
 
-System semantic colors only, so light/dark and Increase Contrast work for free. Color never carries meaning on its own; every state also has a symbol and a text label.
+System semantic colors only. Color never carries meaning on its own; every state also has a symbol and a text label.
 
 | Role | Color |
 | --- | --- |
 | Locked | `.orange` |
-| Unlocked, online | `.green` |
-| Pending | `.accentColor` |
-| Offline, expired, unknown | `.secondary` |
-| Failure | `.red` |
+| Unlocked; online dot | `.green` |
+| In progress | `.accentColor` |
+| Unavailable, unknown, expired | `.secondary` |
+| Failure, rejected | `.red` |
 
 ### Type
 
-SF Pro via text styles only (`.largeTitle`, `.title2`, `.headline`, `.body`, `.footnote`). Dynamic Type is supported up to accessibility sizes. At AX sizes the home screen stacks vertically and the history row moves its time under the status.
+SF Pro via text styles only (`.largeTitle`, `.title2`, `.headline`, `.body`, `.footnote`). Dynamic Type is supported up to accessibility sizes. At AX sizes, status rows stack vertically.
 
 ### Symbols
 
@@ -46,213 +48,255 @@ SF Pro via text styles only (`.largeTitle`, `.title2`, `.headline`, `.body`, `.f
 | Mac | `laptopcomputer` |
 | iPhone | `iphone` |
 | Locked / unlocked | `lock.fill` / `lock.open.fill` |
-| Biometry | `faceid` / `touchid` (from `biometryType`) |
-| Offline | `wifi.slash` |
+| Session unknown | `questionmark.circle` |
+| Unavailable | `wifi.slash` |
+| Authentication | `faceid` / `touchid` / `lock.circle` (passcode) |
 | Success | `checkmark.circle.fill` |
-| Not authorized | `xmark.shield.fill` |
+| Rejected / not verified | `xmark.shield.fill` |
 | Expired | `clock.badge.exclamationmark` |
-| Rejected | `hand.raised.fill` |
-| Not supported | `exclamationmark.triangle.fill` |
-| No confirmation | `questionmark.circle` |
-| Pair | `qrcode.viewfinder` |
+| Unlock failed | `exclamationmark.triangle.fill` |
+| Nearby pairing | `antenna.radiowaves.left.and.right` |
+
+Verify the names in the SF Symbols app for the deployment target.
 
 ### Controls
 
 - Primary action: full-width `Button` with `.buttonStyle(.glassProminent)` and `.controlSize(.large)`, minimum height 50 pt.
 - All tap targets are at least 44 × 44 pt.
-- Haptics: `.success` on `unlocked`, `.error` on `authorization_failed` / `rejected`, `.warning` on `expired` / no confirmation. Nothing else buzzes.
+- Haptics: `.success` on confirmed unlock; `.error` on rejected or failed; `.warning` on expired, unavailable or outcome unknown. Nothing else buzzes.
 
-## 4. Unlock states (iPhone)
+## 4. Status display (iPhone)
 
-The home screen is a state machine. Every protocol status from [`spec.md` §5](spec.md#5-remote-unlock-protocol) maps to exactly one visual state.
+Each Mac shows two independent indicators: **connectivity** and **session**.
 
-| State | Source | Title | Symbol | Tint | Button |
-| --- | --- | --- | --- | --- | --- |
-| Locked | Mac presence | Locked | `lock.fill` | orange | **Unlock Mac** |
-| Unlocked | Mac presence | Unlocked | `lock.open.fill` | green | Unlock Mac (secondary) |
-| Offline | Mac presence / `mac_offline` | Mac is offline | `wifi.slash` | secondary | disabled |
-| Authenticating | local | system biometric sheet | — | — | hidden |
-| Sending | local | Sending… | spinner | accent | disabled |
-| `received` | Mac | Mac received request | spinner | accent | disabled |
-| `authorized` | Mac | Unlocking… | spinner | accent | disabled |
-| `unlocked` | Mac | Unlocked | `checkmark.circle.fill` | green | Done |
-| `already_unlocked` | Mac | Already unlocked | `lock.open.fill` | green | Done |
-| `expired` | Mac | Request expired | `clock.badge.exclamationmark` | secondary | Try Again |
-| No confirmation | local, past `expiresAt` | No confirmation. Your Mac may still be locked. | `questionmark.circle` | secondary | Try Again |
-| `authorization_failed` | Mac | Not authorized | `xmark.shield.fill` | red | Details |
-| `rejected` | Mac | Request rejected | `hand.raised.fill` | red | Details |
-| `not_supported` | Mac | This Mac can't be unlocked remotely | `exclamationmark.triangle.fill` | red | Details |
+| Connectivity | Session | Shown as | Unlock button |
+| --- | --- | --- | --- |
+| Checking… | — | Checking… | Enabled |
+| Online | Locked | ● Online · Locked | Primary |
+| Online | Unlocked | ● Online · Unlocked | Secondary |
+| Online | Unknown | ● Online · Status unknown | Primary |
+| Unavailable | — | Unavailable · Status unknown | Disabled |
 
 Rules:
 
-- Pending states can't be cancelled after sending: the request is already signed and on its way. Before sending (biometric sheet showing), cancelling just returns to idle.
-- Result states stay up for 4 s, or until the user taps Done, then the home screen returns to presence state.
-- "Try Again" always starts from the biometric step with a new request ID and nonce.
+- A fresh signed status is requested every time the app comes to the foreground, and the screen shows "Checking…" until it arrives.
+- Session state comes only from a verified status response. A session-change notification triggers a fresh status request; it is never displayed directly.
+- When connectivity becomes unavailable, the session label switches to "Status unknown" at once. The last known state is never kept on screen.
+- Status is information only. It never enables or skips any authorization step.
 
-## 5. iPhone screens
+## 5. Unlock flow (iPhone)
 
-### 5.1 Home — compact (iPhone, iPhone Duo folded, Split View)
+The flow follows [spec §7](spec.md#7-unlock-flow). The user sees three phases:
+
+| Phase | Spec steps | UI | Cancel |
+| --- | --- | --- | --- |
+| Contacting Mac | 2–9 (challenge requested, Mac signature and binding verified) | "Contacting Home Mac…" with spinner | Yes; nothing has been signed |
+| Authenticate | 10 | System Face ID / Touch ID / passcode sheet | Yes, from the system sheet; returns to idle without a message |
+| Unlocking | 11–17 | "Unlocking…" with spinner | No; the authorization is already signed and sent |
+
+### Results
+
+| Condition ([spec §10](spec.md#10-results-and-failure-handling)) | Title | Symbol | Tint | Button |
+| --- | --- | --- | --- | --- |
+| Unlock confirmed (signed, verified result) | Unlocked | `checkmark.circle.fill` | green | Done |
+| Session already unlocked | Already unlocked | `lock.open.fill` | green | Done |
+| Unknown, expired or consumed challenge | Request expired | `clock.badge.exclamationmark` | secondary | Try Again |
+| Mac's signature doesn't verify on iPhone | Couldn't verify Home Mac | `xmark.shield.fill` | red | Details |
+| iPhone's authorization rejected (invalid signature) | Request rejected | `xmark.shield.fill` | red | Details |
+| Untrusted iPhone or routing grant no longer valid | This iPhone isn't paired with Home Mac | `xmark.shield.fill` | red | Pair Again |
+| User cancels authentication | — (back to idle) | — | — | — |
+| Mac disconnected | Home Mac is unavailable | `wifi.slash` | secondary | — |
+| System unlock mechanism failed | Couldn't unlock Home Mac | `exclamationmark.triangle.fill` | red | Try Again |
+| Authorization sent, response lost | Outcome unknown | `questionmark.circle` | secondary | (status refresh, see below) |
+
+Rules:
+
+- **Outcome unknown** immediately requests a fresh status. The result then reads "Home Mac is unlocked", "Home Mac is still locked" (with Try Again), or "Status unknown". A later "unlocked" is shown as the current state, never as "your unlock worked".
+- **Try Again** starts over from step 2: new attempt ID, new challenge, new system authentication.
+- The challenge lives 60 s. If the system sheet is left open past that, the Mac rejects the late authorization and the result is "Request expired".
+- Results stay up until Done, or 4 s for success. Then the screen returns to the status display.
+
+## 6. iPhone screens
+
+### 6.1 Mac list
+
+The root of navigation. Each row shows the Mac name, the connectivity dot and the session label. The toolbar has **+ Add Mac** and Settings. With exactly one paired Mac, the app opens straight to its detail on compact width. With none, the empty state reads "Pair your Mac. Keep your iPhone next to it and open Wakeveil on both." with **Add Mac**.
+
+### 6.2 Mac detail — compact (iPhone, iPhone Duo folded, Split View)
 
 ```text
 ┌────────────────────────────┐
-│ Wakeveil                ⚙  │
+│ ‹ Macs                 (i) │
 │                            │
-│       [laptopcomputer]     │
+│      [laptopcomputer]      │
 │          Home Mac          │
-│          ● Online          │
 │                            │
-│       [lock.fill]          │
-│          Locked            │
+│   ● Online   [lock] Locked │
+│                            │
+│                            │
 │                            │
 │  ┌──────────────────────┐  │
 │  │      Unlock Mac      │  │
 │  └──────────────────────┘  │
-│    Last unlock 10:42 AM    │
 │                            │
-├────────────────────────────┤
-│  Unlock   History  Devices │
 └────────────────────────────┘
 ```
 
 - The Unlock button sits in the bottom third, within thumb reach. On iPhone Duo folded, that is also close to the side-button Touch ID sensor.
-- Tabs: **Unlock**, **History**, **Devices**. Settings is the gear in the toolbar.
+- (i) opens Mac details (§6.6).
 
-### 5.2 Home — regular width (iPhone Duo unfolded)
+### 6.3 Mac detail — regular width (iPhone Duo unfolded)
 
 ```text
 ┌──────────────────────────────┬┬──────────────────────────────┐
-│ Wakeveil                     ││                           ⚙  │
-│                              ││ Recent attempts              │
-│      [laptopcomputer]        ││                              │
-│         Home Mac             ││ 10:42  Unlocked          ✓   │
-│         ● Online             ││ 09:15  Request expired   !   │
-│                              ││ Yesterday  Unlocked      ✓   │
-│      [lock.fill] Locked      ││                              │
-│                              ││ Home Mac                     │
-│  ┌────────────────────────┐  ││ macOS 27.0 · Relay connected │
-│  │       Unlock Mac       │  ││ Paired with this iPhone Duo  │
-│  └────────────────────────┘  ││                              │
-│    Last unlock 10:42 AM      ││                    See All › │
+│ Macs                    +    ││                          (i) │
+│                              ││       [laptopcomputer]       │
+│ > Home Mac                   ││           Home Mac           │
+│   ● Online · Locked          ││                              │
+│                              ││    ● Online   [lock] Locked  │
+│   Studio Mac                 ││                              │
+│   Unavailable · Unknown      ││  ┌────────────────────────┐  │
+│                              ││  │       Unlock Mac       │  │
+│                              ││  └────────────────────────┘  │
+│   Settings                   ││                              │
 └──────────────────────────────┴┴──────────────────────────────┘
                                ▲ fold
 ```
 
-- Two panes split **on the fold**: the primary pane holds status and Unlock, the secondary pane holds recent attempts and device details. With one Mac there is nothing to put in a list column, so this is a dashboard, not a master-detail layout.
-- Navigation uses `TabView` with `.tabViewStyle(.sidebarAdaptable)`: a tab bar when compact, a sidebar (hidden by default) when regular.
-- Switch layouts by `horizontalSizeClass`, not by orientation or screen size. The inner display ignores the app's supported orientations, so portrait and landscape both happen. Use `AnyLayout` (`HStackLayout` / `VStackLayout`) so the change animates.
-- Unfolded but sharing the screen with another app (compact width): use the compact layout from 5.1.
+- `NavigationSplitView`: the sidebar is the Mac list, the detail is the selected Mac. It collapses to a stack automatically on compact width.
+- The column boundary sits on the fold where the system reports fold geometry. If it can't be aligned, the fold region stays free of controls.
+- Switch layouts by `horizontalSizeClass`, not by orientation or screen size. The inner display ignores the app's supported orientations, so portrait and landscape both happen.
+- Unfolded but sharing the screen with another app (compact width): use the compact layout from §6.2.
 
-### 5.3 iPhone Duo: fold, posture and continuity
+### 6.4 iPhone Duo: fold, posture and continuity
 
-- **Nothing on the fold.** Don't centre the Unlock button on the screen; centre it in its pane. Take the fold position from the system (reserved regions / safe area where available), never from hard-coded coordinates. Leave a gutter of at least 16 pt either side of the fold with no interactive content.
-- **Partially folded.** Touch near the crease is unreliable. Keep the button inside a pane, and keep the pane divider on the fold.
-- **Fold or unfold mid-flow.** The request lifecycle belongs to a model object, not to a view. Moving between displays must:
-  - keep the current state (pending, result) exactly as it was;
-  - never resend, duplicate or cancel an in-flight request;
-  - never re-trigger the biometric prompt.
-  If the system dismisses the biometric sheet during the transition, return to idle; the user taps Unlock again.
+- **Nothing on the fold.** Centre the Unlock button in its column, not on the screen. Take the fold position from the system (reserved regions / safe area where available), never from hard-coded coordinates. Leave a gutter of at least 16 pt either side of the fold with no interactive content.
+- **Partially folded.** Touch near the crease is unreliable. Keep controls inside a column.
+- **Fold or unfold mid-flow.** The attempt belongs to a model object, not to a view. Moving between displays must:
+  - keep the current phase and result exactly as they were;
+  - never request a new challenge, resend an authorization, or re-trigger system authentication.
+  If the system dismisses the authentication sheet during the transition, treat it as a cancel and return to idle.
 - **Under-display camera** on the inner screen: respect the safe area; nothing tappable underneath.
-- **Touch ID on the side button.** Don't draw a custom fingerprint UI or arrows. The system biometric sheet already points to the sensor. In-app copy says "Touch ID" and uses the `touchid` symbol.
-- **Testing:** the iPhone Duo simulator (fold, unfold, rotate, partial fold) plus a physical device before release.
+- **Touch ID on the side button.** No custom fingerprint UI or arrows; the system sheet already points to the sensor. In-app copy says "Touch ID" and uses `touchid`.
+- **Testing:** the iPhone Duo simulator (fold, unfold, rotate, partial fold) plus a physical device.
 
-### 5.4 Biometric step
+### 6.5 Authentication step
 
-- Reason string (`localizedReason`): **Unlock “Home Mac”** (the paired Mac's name).
-- Face ID devices: `NSFaceIDUsageDescription` = "Wakeveil uses Face ID to approve each unlock of your Mac."
-- No in-app reuse: every unlock creates a new `LAContext` and evaluates again.
-- Biometry not available or not enrolled: the home screen replaces the button with "Set up Face ID / Touch ID to use Wakeveil" and a link to Settings.
-- Biometric set changed (the key is invalidated by `.biometryCurrentSet`): show "Your Face ID / Touch ID changed. Pair this iPhone again to keep unlocking Home Mac.", with **Pair Again**.
+- The unlock-signing key requires system-enforced user authentication for every signature. The app has no "authenticated" state of its own and never reuses an `LAContext` across attempts.
+- Reason string: **Unlock “Home Mac”** (the paired Mac's name). Face ID devices also need `NSFaceIDUsageDescription`: "Wakeveil uses Face ID to approve each unlock of your Mac."
+- Authentication not available or not enrolled: the button is replaced with "Set up Face ID / Touch ID / a passcode to unlock your Mac", with a link to Settings. The text matches the policy.
+- Key invalidated (for example, the biometric set changed under a `.biometryCurrentSet` policy): "Your Face ID / Touch ID changed. Pair this iPhone with Home Mac again." with **Pair Again**. Pairing again happens next to the Mac (§6.7).
 
-### 5.5 Pairing
+### 6.6 Mac details
 
-1. **Devices › Pair a Mac** → camera view with a `qrcode.viewfinder` frame and "Scan the code shown on your Mac."
-2. After a scan: "Pair with “Home Mac”?" with a 6-digit verification code, also shown on the Mac. Primary: **Continue**.
-3. Waiting: "Confirm on your Mac" with a spinner. The Mac must approve locally.
-4. Done: "Paired" with **Unlock Mac** as the next action.
+The Mac's name, paired date, short key fingerprint and supported macOS version.
 
-An expired or reused code reads "This code has expired. Show a new one on your Mac."
+**Remove from This iPhone** is destructive. Its confirmation reads: "This deletes Home Mac's pairing from this iPhone. To stop this iPhone from unlocking Home Mac, also remove it on the Mac." Removing on the iPhone does not revoke trust on the Mac ([spec §11](spec.md#11-trust-revocation)).
 
-### 5.6 History
+### 6.7 Pairing (iPhone side)
 
-A grouped list (Today / Yesterday / date) of rows: time · result symbol + label · Mac name. Tapping a row shows request ID, issued/expires times, and the final status. It is read-only; nothing in it can be retried.
+Works without internet. Follows [spec §4](spec.md#4-bluetooth-pairing).
 
-### 5.7 Devices and device details
+1. **+ Add Mac.** The first time, the system asks for Bluetooth permission.
+2. **Looking for your Mac.** "On your Mac, open Wakeveil and choose Add iPhone. Keep your iPhone nearby." The screen shows `antenna.radiowaves.left.and.right`.
+3. **Code.** "Does this code match the one on Home Mac?", with the code in large monospaced digits (length set by the pairing protocol). Buttons: **Codes Match** and **Cancel**.
+4. **Waiting.** "Confirm the code on your Mac."
+5. **Paired.** Then Home Mac's detail screen with status loading.
 
-- Paired Macs list (one in the MVP) → details: name, macOS version, relay status, paired date, key fingerprint (short form).
-- **Remove This Mac**: destructive, with a confirmation alert.
+Errors. Every error ends pairing, and nothing is saved:
 
-### 5.8 Settings
+| Situation | Text |
+| --- | --- |
+| Bluetooth off | Turn on Bluetooth to add a Mac. |
+| Bluetooth permission denied | Allow Bluetooth for Wakeveil in Settings to add a Mac. |
+| Codes don't match, or cancelled on either device | Pairing cancelled. Nothing was saved. |
+| Abandoned / timed out | Pairing timed out. Start again on both devices. |
+| Another pairing in progress on the Mac | Your Mac is busy pairing another iPhone. Try again in a moment. |
 
-- Biometry (read-only status: Face ID / Touch ID, enrolled or not).
-- Passcode fallback: shown only if the security policy allows it; off by default.
-- Relay server (advanced, read-only in the MVP).
-- About, version, licences.
+### 6.8 Settings
 
-## 6. Mac app
+- Authentication method (read-only): Face ID / Touch ID / passcode, enrolled or not.
+- Relay server (advanced; read-only in the MVP).
+- About, version, licences, link to the source code.
 
-### 6.1 Main window
+## 7. Mac app
+
+### 7.1 Main window
 
 ```text
 ┌───────────────┬──────────────────────────────────────────┐
 │ Overview      │ Home Mac                                 │
 │ iPhones       │                                          │
-│ History       │ Relay          ● Connected               │
-│ Security      │ Screen         Unlocked                  │
+│ Security      │ Relay          ● Connected               │
 │               │ Remote unlock  Ready                     │
+│               │ macOS          27.0 (supported)          │
 │               │                                          │
-│               │ Recent attempts                          │
-│               │ 10:42  iPhone Duo   Unlocked          ✓  │
-│               │ 09:15  iPhone Duo   Request expired   !  │
+│               │ Paired iPhones                           │
+│               │ iPhone Duo       Paired Oct 22           │
+│               │ iPhone 17 Pro    Paired Oct 22           │
 │               │                                          │
-│ + Pair iPhone │                                          │
+│ + Add iPhone  │                                          │
 └───────────────┴──────────────────────────────────────────┘
 ```
 
-- `NavigationSplitView`: **Overview**, **iPhones**, **History**, **Security**.
-- "Screen" is shown only when the lock state is reliably known; otherwise the row is hidden, not guessed.
-- "Remote unlock" shows `Ready`, `Not installed`, `Not supported on this configuration` (with a reason, e.g. FileVault), or `Error` with a link to recovery docs.
+- `NavigationSplitView`: **Overview**, **iPhones**, **Security**.
+- **Relay** shows Connected, Reconnecting (with time to next attempt), or Unavailable.
+- **Remote unlock** shows Ready, Not installed, Not supported on this macOS version, or Error, with a link to recovery docs.
+- **macOS** shows the running version and whether it is the declared supported version ([spec §1](spec.md#1-first-milestone-validate-macos-unlocking)).
 
-### 6.2 Pairing (Mac side)
+### 7.2 Add iPhone (pairing, Mac side)
 
-1. **Pair iPhone** → sheet with a QR code, a countdown (the session is short-lived), and "Scan with Wakeveil on your iPhone."
-2. After the iPhone scans: "Allow “iPhone Duo” to unlock this Mac?", with the same 6-digit code shown on the iPhone, the device model, and **Allow** / **Don't Allow**. **Allow** requires local authentication on the Mac (Touch ID or password).
-3. Done → the iPhone appears under **iPhones**.
+Only possible on the unlocked Mac, in person.
 
-### 6.3 iPhones and revocation
+1. **+ Add iPhone** opens a sheet: "On your iPhone, open Wakeveil and tap Add Mac. Keep it next to this Mac." The first time, the system asks for Bluetooth permission.
+2. **Code.** "Does this code match the one on your iPhone?", with the same large monospaced code and the iPhone's name and model. Buttons: **Codes Match** and **Cancel**.
+3. **Done.** The iPhone appears under **iPhones**.
 
-A list of paired iPhones (name, model, paired date, last used). **Revoke** is destructive and asks for confirmation: "“iPhone Duo” will no longer be able to unlock this Mac." Revocation takes effect immediately, including for requests in flight.
+The errors match the iPhone side (§6.7), with the wording reversed.
 
-### 6.4 Security
+### 7.3 iPhones and revocation
 
-Shows the authorization integration status and the install / uninstall actions, each requiring administrator approval. It also links to the recovery documentation and says plainly that **your password always works on the lock screen**.
+A list of trusted iPhones: name, model, paired date.
 
-## 7. Accessibility
+**Remove** is destructive. Its confirmation reads: "“iPhone Duo” will no longer be able to unlock this Mac. Other iPhones stay paired." Removal takes effect at once and invalidates that phone's outstanding challenges. Remaining phones get updated relay access automatically; there is no extra UI unless it fails.
 
-- VoiceOver: the status block reads as one element ("Home Mac, online, locked"). The Unlock button's label includes the Mac's name. State changes are announced with `AccessibilityNotification.Announcement`.
-- Reduce Motion: no pulsing or scaling while pending; a static spinner only.
+A footer links to "Lost an iPhone?", the recovery documentation.
+
+### 7.4 Security
+
+- The unlock component's status, plus **Install…** and **Uninstall…** actions. Each requires administrator authorization.
+- Links to installation, removal and recovery docs.
+- A plain statement: **Your password always works on the lock screen.**
+
+## 8. Accessibility
+
+- VoiceOver reads each status block as one element ("Home Mac, online, locked" / "Home Mac, unavailable, status unknown"). The Unlock button's label includes the Mac's name. Phase changes and results are announced with `AccessibilityNotification.Announcement`.
+- The pairing code is read digit by digit.
+- Reduce Motion: no pulsing or scaling while in progress; a static spinner only.
 - Every state has text plus a symbol, so it never depends on color.
-- Full Dynamic Type, including AX sizes (see §3).
-- Mac: full keyboard navigation; Return triggers the default button in sheets, except destructive ones.
+- Full Dynamic Type, including AX sizes.
+- Mac: full keyboard navigation. Return triggers the default button, except in destructive confirmations and in the pairing code check. There, the user must choose explicitly.
 
-## 8. Copy
+## 9. Copy
 
 | Situation | Text |
 | --- | --- |
 | Primary button | Unlock Mac |
-| Sent | Sending… |
-| Mac acknowledged | Mac received request |
-| Mac verified | Unlocking… |
-| Success | Unlocked |
-| Offline | Mac is offline. It will appear here when it reconnects. |
-| No confirmation | No confirmation. Your Mac may still be locked. |
+| Requesting challenge | Contacting Home Mac… |
+| Authorization sent | Unlocking… |
+| Confirmed | Unlocked |
+| Already unlocked | Already unlocked |
+| Unavailable | Home Mac is unavailable. It will show as online when it reconnects. |
+| Status unknown | Status unknown |
+| Outcome unknown | Outcome unknown. Checking Home Mac… |
 | Expired | Request expired. Try again. |
-| Not authorized | This iPhone isn't authorized for this Mac. |
-| Not supported | This Mac can't be unlocked remotely. See details. |
+| Unlock failed | Couldn't unlock Home Mac. Your password still works on the Mac. |
+| Not paired | This iPhone isn't paired with Home Mac. Pair again next to the Mac. |
 
 Tone: short, literal, no exclamation marks, no blame.
 
-## 9. Open questions
+## 10. Open questions
 
-- Lock Screen widget / Control Center control for Unlock. Both would still need to open the app for the biometric step; decide after Milestone 3.
-- Multiple Macs: the regular-width layout would gain a Mac list column. Out of scope for the MVP.
-- Whether the iPhone Duo outer display's Always-On view should show the Mac's presence. Privacy review needed.
+- Unlock history isn't in the MVP spec. If it is added, keep it local to each device; the relay stores nothing.
+- Lock Screen widget / Control Center control for Unlock. Both would still require system authentication in the app; decide after the core flow ships.
+- Whether the iPhone Duo outer display's Always-On view should show a Mac's status. Privacy review needed.

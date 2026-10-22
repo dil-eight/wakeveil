@@ -1,533 +1,465 @@
-# Remote Mac Unlock — Implementation Specification
-
-## 1. Objective
-
-Build a native iOS + macOS application that allows a user to remotely unlock their personal Mac from an iPhone over the internet.
-
-**Primary use case:** the user is at work with their iPhone. Their personal Mac is at home, connected to the internet, and currently locked. The user opens the iPhone app, authenticates with Face ID (Touch ID on iPhone Duo), taps **Unlock**, and the home Mac unlocks its existing macOS user session.
-
-No Bluetooth, shared Wi-Fi network, physical proximity, remote desktop interaction, or manual password entry should be required for the successful remote-unlock flow.
-
-### Core principles
+# Wakeveil MVP — Implementation Specification
 
-- Native Apple applications.
-- End-to-end authenticated commands.
-- No account password transmission.
-- No cloud storage of macOS credentials.
-- Minimal infrastructure.
-- No dependency on accessibility-based password typing.
-- Preserve standard macOS password unlock.
-- Fail closed on unauthorized commands.
-- Never introduce an unrecoverable lockout condition.
+## Objective
 
-## 2. Technical Architecture
+Build an open-source iPhone and macOS application that lets a user authorize unlocking their paired Mac over the internet.
 
-### Components
+Devices are paired locally over Bluetooth once. Subsequent requests use an HTTPS API and an outbound WebSocket connection maintained by the Mac.
 
-**iOS Application**
+## Fixed Requirements
 
-- Swift 6
-- SwiftUI
-- LocalAuthentication
-- CryptoKit
-- Keychain / Secure Enclave
-- URLSession WebSocket or HTTPS
+- iOS and macOS applications written in Swift.
+- Relay backend written in Go.
+- Initial deployment target: Linux VPS with 1 vCPU and 1 GB RAM.
+- No user accounts.
+- No Mac account passwords stored or submitted by Wakeveil.
+- No SQL database, Redis, or WebRTC.
+- Initial pairing requires Bluetooth proximity and confirmation on an unlocked Mac.
+- Private keys and device trust remain on the devices.
+- The relay cannot authorize an unlock or introduce trusted devices.
+- No persistent command queue or automatic retries of unlock commands.
+- Server upgrades and restarts must not require pairing again.
 
-**macOS Application**
+## 1. First Milestone: Validate macOS Unlocking
 
-- Swift 6
-- SwiftUI
-- Background agent
-- LaunchDaemon or LaunchAgent, depending on verified requirements
-- CryptoKit
-- Keychain
-- Security.framework
-- Optional Authorization Plugin
+Before implementing the complete product, build an isolated proof of concept that unlocks an existing locked macOS user session without storing or submitting the account password.
 
-**Relay Backend**
+Investigate the macOS authorization plug-in mechanism using current Apple documentation. Do not assume a general-purpose unlock API exists.
 
-- Go
-- HTTPS / WebSocket
-- Lightweight deployment via Docker
-- SQLite for MVP metadata, if persistence is necessary
+### Required validation
 
-### Communication flow
+- Demonstrate unlocking on an explicitly declared macOS version.
+- Preserve ordinary password-based login and unlock.
+- Ensure a missing, unavailable, or crashing Wakeveil component does not block ordinary unlock.
+- Test repeated lock/unlock cycles.
+- Confirm the session actually becomes unlocked.
+- Document installation, removal, and recovery.
+- Require explicit administrator authorization for privileged installation.
 
-```text
-iPhone
-  |
-  | Face ID / Touch ID authentication
-  |
-  | Signed unlock request
-  v
-Relay Server (Internet)
-  |
-  | Authenticated encrypted channel
-  v
-macOS Background Agent
-  |
-  | Verify device signature,
-  | nonce, freshness, permissions
-  v
-macOS Authorization Integration
-  |
-  | Complete an authorized
-  | screen-unlock transaction
-  v
-Existing macOS session unlocked
-```
+Do not disable SIP or FileVault, weaken the standard authentication path, or implement a fake lock screen.
 
-The backend must never possess enough key material to impersonate the authorized iPhone.
+If the proof of concept cannot meet these requirements, stop and report the blocker before implementing the remaining product.
 
-## 3. Phase 0 — macOS Unlock Feasibility
+### MVP scope
 
-**Priority: Critical**
+Support an awake Mac with an existing locked user session.
 
-Before developing the complete product, investigate whether a supported and reliable mechanism exists for remotely authorizing a screen unlock on the target macOS version.
+The following are outside the MVP:
 
-### Research
+- Waking a sleeping Mac over the internet.
+- FileVault preboot unlock.
+- Initial login after restart.
 
-Investigate:
+## 2. Architecture
 
-- Apple Authorization Services
-- `Security.AuthorizationPlugin`
-- `system.login.screensaver`
-- `SFAuthorizationPluginView`
-- SecurityAgent plugin lifecycle
-- Screen-unlock policy configuration
-- FileVault restrictions
-- Fast User Switching
-- Sleep and wake behavior
-- macOS 26 and macOS 27 compatibility
+| Component | Responsibilities |
+|---|---|
+| iOS application | BLE pairing, paired Mac list, status display, user authentication, signed unlock authorization |
+| macOS agent | Pairing, trusted device storage, WebSocket connection, challenge handling, session status |
+| macOS authorization component | Minimal integration with the validated system unlock mechanism |
+| Go relay | Connection authentication, message routing, bounded request correlation, rate limiting |
 
-Use Apple's official documentation as the primary reference.
+Keep networking and untrusted message parsing outside the privileged authorization component wherever possible.
 
-### Proof of concept
+Authenticate and authorize the local IPC boundary. An unrelated local process must not be able to authorize unlocking.
 
-Build an isolated local prototype capable of receiving an authorization event and evaluating whether an already-logged-in, locked macOS session can be unlocked through a legitimate authorization mechanism.
+## 3. Device Identity and Storage
 
-The prototype must distinguish between:
+Each device has a cryptographic identity.
 
-1. Authenticating inside the application.
-2. Unlocking an existing macOS graphical session.
-3. Logging into macOS after a reboot.
-4. Unlocking a FileVault-protected startup volume.
+- Generate keys using platform cryptographic APIs.
+- Protect private keys using platform storage.
+- Use Secure Enclave keys where supported and appropriate.
+- Specify a canonical public-key representation.
+- Derive device IDs from a cryptographic hash of that representation.
+- Persist trusted peer keys only after successful pairing.
 
-Only item 2 is required for the MVP.
+The iPhone unlock-signing key must require system-enforced user authentication for each authorization operation.
 
-### Safety requirements
+Do not rely solely on a UI flag indicating that Face ID succeeded. Do not reuse an authenticated context in a way that silently authorizes a later unlock attempt.
 
-Do not automatically modify the system authorization database during development.
+Support Face ID, Touch ID, or device passcode according to the selected platform policy. Validate that the key access-control configuration supports the intended fallback.
 
-If a plugin is necessary:
+A separate protected identity key may authenticate routine relay requests without prompting for biometrics. If separate keys are used, bind both keys to the device during pairing and document their purposes.
 
-- Require explicit local administrator approval.
-- Back up the original authorization rule.
-- Provide installation and uninstall scripts.
-- Preserve the built-in password authentication mechanism.
-- Document emergency recovery procedures.
-- Never replace the only working authentication mechanism.
-- Test on a disposable macOS installation or VM before installing on the primary computer.
-- Do not alter SIP settings or protected system components.
+### Persistent storage
 
-The local proof of concept must demonstrate a real screen unlock.
+| Location | Stored data |
+|---|---|
+| Mac | Own keys, trusted iPhone keys, permissions, routing generation, settings |
+| iPhone | Own keys, trusted Mac keys, paired-device metadata, routing grants |
+| Relay | None required |
 
-Do not treat screen wake, screensaver dismissal, simulated keyboard input, or application authentication as successful system unlock.
+### Volatile storage
 
-### Deliverables
+- Active connections.
+- Pending API requests.
+- Replay-protection and rate-limit state.
+- Outstanding Mac challenges.
 
-- [`docs/feasibility.md`](feasibility.md)
-- Technical decision record ([`docs/adr/`](adr/))
-- Minimal unlock prototype ([`poc/macos-unlock/`](../poc/macos-unlock/))
-- Compatibility findings
-- Installation and recovery documentation
-- Explicit **GO / NO-GO** recommendation
+Server restarts must not invalidate device identities or require pairing again.
 
-If reliable native screen unlocking is not feasible, document the blockers and stop implementation of that portion rather than presenting a simulated result.
+## 4. Bluetooth Pairing
 
-## 4. Device Pairing
+Implement an application-level pairing protocol over BLE using Core Bluetooth.
 
-Pair one Mac with one iPhone initially.
+BLE connectivity alone does not authenticate the peer.
 
-### Pairing process
+### User flow
 
-1. Install and launch the macOS application.
-2. Generate a unique Mac device identity.
-3. Generate an iPhone authentication key.
-4. Display a one-time pairing QR code on Mac.
-5. Scan the QR code using the iPhone app.
-6. Require local confirmation on the Mac.
-7. Exchange public keys securely.
-8. Store the trusted device identities locally.
-9. Register routing identifiers with the relay.
+1. User opens Wakeveil on an unlocked Mac.
+2. User selects **Add iPhone**.
+3. User opens Wakeveil on iPhone and selects **Add Mac**.
+4. Devices establish a BLE connection.
+5. Devices execute an authenticated key exchange with a short authentication string.
+6. Both devices display the verification code.
+7. User confirms matching codes on both devices.
+8. Devices persist peer identities and permissions after successful confirmation.
 
-Private keys must never leave their originating devices.
+Pairing must work without internet access.
 
-### Pairing security
+### Protocol requirements
 
-- Short-lived pairing sessions.
-- Single-use tokens.
-- Explicit Mac-side approval.
-- Public-key verification.
-- Replay protection.
-- Ability to revoke paired devices.
-- No pairing through an unauthenticated remote request.
+- Select and document a reviewed pairing protocol before implementation.
+- Use established cryptographic libraries.
+- Do not substitute an improvised key exchange followed by a truncated hash comparison.
+- Bind identities, roles, exchanged keys, ephemeral data, and confirmations to the pairing transcript.
+- Expire abandoned attempts.
+- Limit concurrent attempts.
+- Require a new local pairing flow for a new iPhone.
+- Do not expose an endpoint that remotely adds trusted keys.
 
-## 5. Remote Unlock Protocol
+If a suitable implementation cannot be identified, report the blocker.
 
-### Request
+## 5. Mac Relay Connection
 
-An unlock request should contain:
+The Mac maintains an outbound TLS-protected WebSocket connection.
 
-```json
-{
-  "protocolVersion": 1,
-  "requestId": "uuid",
-  "deviceId": "mac-id",
-  "senderId": "iphone-id",
-  "action": "unlock",
-  "nonce": "random-value",
-  "issuedAt": "ISO-8601",
-  "expiresAt": "ISO-8601",
-  "signature": "base64-signature"
-}
-```
+### Authentication handshake
 
-Use a canonical binary encoding or canonical serialization for the exact signed payload. The signature must cover every security-relevant field.
+1. Relay issues a fresh random challenge.
+2. Mac provides its public key and signs the challenge with connection context.
+3. Relay verifies the signature.
+4. Relay verifies that the public key hashes to the claimed Mac ID.
+5. Relay associates the authenticated ID with the connection.
 
-### Security
+Connection challenges must be short-lived, bound to the connection, and accepted only once.
 
-- Require fresh biometric authentication (Face ID, or Touch ID on iPhone Duo) before each unlock.
-- Use a Secure Enclave-backed private key when supported.
-- Use a cryptographic challenge-response protocol.
-- Bind requests to the paired Mac identity.
-- Use short request expiration windows.
-- Reject duplicated nonces and request IDs.
-- Validate timestamps with reasonable clock-skew handling.
-- Prevent cross-device command replay.
-- Use authenticated HTTPS/WSS connections.
-- Rate-limit requests.
-- Maintain an auditable unlock-attempt history.
+Maintain an in-memory mapping:
 
-Successful biometric authentication only authorizes access to the device's signing key. The Mac must independently verify the cryptographic authorization.
+`Mac ID → authenticated WebSocket connection`
 
-### Response
+When replacing a connection, cleanup of an old connection must not remove its replacement.
 
-```json
-{
-  "requestId": "uuid",
-  "status": "unlocked",
-  "deviceId": "mac-id"
-}
-```
+The Mac advertises its current routing generation over the authenticated connection.
 
-Possible statuses:
+## 6. Routing Authorization
 
-- `received`
-- `authorized`
-- `unlocked`
-- `already_unlocked`
-- `mac_offline`
-- `not_supported`
-- `authorization_failed`
-- `expired`
-- `rejected`
+Knowing a Mac ID must not grant permission to query its status or forward messages.
 
-Only return `unlocked` when successful macOS screen unlock has actually been verified through an appropriate system signal.
+During local pairing, the Mac issues a signed routing grant to the iPhone.
 
-## 6. macOS Application
+### Grant contents
 
-### Main window
+- Protocol version and purpose.
+- Mac ID.
+- iPhone identity and request-authentication key binding.
+- Allowed operations.
+- Routing generation.
 
-Display:
+The iPhone includes the grant with authenticated API requests.
 
-- Mac device name.
-- Relay connection status.
-- Paired iPhones.
-- Screen lock state, when reliably available.
-- Recent unlock attempts.
-- Security settings.
-- Revoke device action.
+The relay verifies:
 
-### Background agent
+- Mac signature and identity.
+- iPhone identity and request signature.
+- Requested operation.
+- Current routing generation.
 
-The background component must:
+Request signatures must bind the method, route, request content, request ID, and freshness data.
 
-- Start automatically when required and permitted.
-- Maintain a secure outbound connection.
-- Reconnect after internet interruptions.
-- Verify incoming requests.
-- Apply replay protection.
-- Coordinate with the authorization component.
-- Report outcomes.
-- Avoid exposing a public inbound port.
+Define bounded replay protection and expiration for API authentication. This protection is separate from Mac-side unlock challenge consumption.
 
-Do not assume the user-facing LaunchAgent can continue running in every lock-screen or pre-login state. Select the appropriate process architecture based on actual system lifecycle requirements.
+A routing grant permits communication only. The Mac independently checks local trust before accepting an unlock authorization.
 
-### Reliability
+Do not introduce a persistent server-side pairing database.
 
-Handle:
+## 7. Unlock Flow
 
-- Locked session.
-- Already-unlocked session.
-- Network disconnection.
-- Relay restart.
-- Mac sleep.
-- User logout.
-- Mac restart.
-- Multiple macOS users.
-- Unsupported security configuration.
+1. User taps **Unlock** on iPhone.
+2. iPhone requests a challenge through the relay.
+3. Relay forwards the authenticated request over the Mac's WebSocket.
+4. Mac checks that the requesting iPhone is locally trusted.
+5. Mac generates a cryptographically random nonce and stores the pending challenge in memory.
+6. Mac signs the challenge.
+7. Relay returns the challenge to iPhone.
+8. iPhone verifies the signature using the Mac key saved during pairing.
+9. iPhone verifies that the challenge matches the current attempt, device pair, and action.
+10. iPhone requests system user authentication.
+11. After successful authentication, iPhone signs an authorization bound to the complete challenge.
+12. Relay forwards the authorization to Mac.
+13. Mac verifies the trusted iPhone's signature, challenge binding, expiration, and unused state.
+14. Mac atomically consumes the challenge.
+15. Mac invokes the validated local unlock mechanism.
+16. Mac returns a signed result.
+17. iPhone verifies the result and displays the outcome.
 
-No unlock request may be automatically replayed after expiration or after a reconnect.
+### Signed challenge fields
 
-## 7. iPhone Application
+- Protocol version.
+- Message purpose.
+- Attempt ID.
+- Mac ID.
+- iPhone ID.
+- Action: `unlock`.
+- Random nonce.
+- Challenge lifetime.
 
-### Supported devices
+The authorization must bind the complete challenge and intended action.
 
-- iPhone models with Face ID.
-- iPhone Duo, folded (outer display) and unfolded (inner display), with Touch ID in the side button.
+Use canonical encoding and distinct signing contexts for:
 
-Layouts adapt by size class; the app must keep its state when iPhone Duo is folded or unfolded mid-flow. UI design: [`design.md`](design.md).
+- Connection authentication.
+- API authentication.
+- Routing grants.
+- Unlock challenges.
+- Unlock authorizations.
+- Status responses.
+- Operation results.
 
-### Main screen
+Document exact encoding, algorithms, key formats, and signature formats before implementing clients independently.
 
-Minimal interface:
+### Challenge lifecycle
 
-```text
-Remote Unlock
-Home Mac
-● Online
-Status: Locked
-[ Unlock Mac ]
-Last unlock: 10:42 AM
-```
+- Initial configurable lifetime: 60 seconds.
+- Enforce expiration on Mac using a local monotonic deadline.
+- Do not extend expiration when an authorization arrives late.
+- Consume atomically before attempting to unlock.
+- Reject unknown, expired, consumed, or mismatched challenges.
+- Bound outstanding challenges per phone and globally.
+- Invalidate affected challenges when trust is revoked.
+- Invalidate all outstanding challenges when the Mac agent restarts.
 
-### Unlock interaction
+A failed attempt requires a fresh challenge and another explicit user action.
 
-1. Tap **Unlock**.
-2. Perform biometric authentication (Face ID or Touch ID).
-3. Obtain a fresh challenge.
-4. Sign the authorization request.
-5. Send it through the relay.
-6. Display pending state.
-7. Wait for confirmed completion.
-8. Display the result.
+## 8. API Outline
 
-### Additional screens
+| Endpoint | Purpose |
+|---|---|
+| `WSS /v1/mac/connect` | Authenticate and connect a Mac |
+| `POST /v1/status` | Request fresh signed status |
+| `POST /v1/unlock/challenge` | Request a signed unlock challenge |
+| `POST /v1/unlock/authorize` | Submit signed unlock authorization |
 
-- Pair a Mac.
-- Paired devices.
-- Device details.
-- Unlock history.
-- Security settings.
+Use HTTPS for every API request.
 
-Touch ID is the primary biometric on iPhone Duo, which has no Face ID. Device passcode fallback is supported only if explicitly permitted by the application's security policy.
+Validate request authentication and routing permission before forwarding.
 
-## 8. Backend
+Pending HTTP requests may wait for a bounded period for a correlated WebSocket response.
 
-Implement a minimal relay service.
+Bound:
 
-### Responsibilities
+- Request body and frame sizes.
+- Concurrent pending requests.
+- Request duration.
+- Outgoing queues.
+- Replay-protection state.
+- Memory use per connection and device.
 
-- Route commands between paired devices.
-- Authenticate connections.
-- Track device presence.
-- Issue short-lived challenges.
-- Enforce expiration and rate limits.
-- Forward command acknowledgments.
-- Prevent unauthorized device enumeration.
+Do not persist pending operations or deliver them after reconnection.
 
-### Restrictions
+## 9. Device Status
 
-The backend must not:
+Represent connectivity and session state separately.
 
-- Store macOS passwords.
-- Store private signing keys.
-- Generate trusted unlock requests on behalf of an iPhone.
-- Grant unlock permission without the device-level cryptographic authorization.
-- Store sensitive credentials in logs.
+| Property | Values |
+|---|---|
+| Connectivity | Online, unavailable |
+| Session | Locked, unlocked, unknown |
 
-### Deployment
+A live WebSocket establishes relay connectivity. It does not independently prove the current session state.
 
-Provide:
+### Behavior
 
-- Go service.
-- Dockerfile.
-- Docker Compose configuration.
-- Environment configuration template.
-- Health endpoint.
-- Structured logging.
-- Graceful shutdown.
-- Basic operational documentation.
+- Request fresh signed status when the iOS app opens.
+- Bind the response to a fresh iPhone request nonce and device identities.
+- Send session-change notifications through the existing WebSocket.
+- Treat notifications as refresh hints when necessary.
+- Mark connectivity unavailable after connection loss.
+- Do not present stale session state as current.
+- Refresh status after an unlock attempt with an uncertain result.
 
-## 9. Credential Handling
+Validate session-state detection on the supported macOS version.
 
-**Preferred model:** passwordless remote authorization through a verified macOS authorization extension.
+Display sleep, screensaver activity, and an inactive session are not sufficient substitutes for a reliable lock-state check.
 
-The user's macOS password must not be required for each remote-unlock operation if the native authorization mechanism can safely support the intended workflow.
+Return `unknown` when the state cannot be established reliably.
 
-### Alternative: locally stored macOS password
+Status must never substitute for authorization checks.
 
-Investigate this only if passwordless integration is infeasible.
+## 10. Results and Failure Handling
 
-Requirements:
+| Condition | Behavior |
+|---|---|
+| Unlock confirmed | Display success |
+| Session already unlocked | Return an explicit already-unlocked result |
+| Invalid signature | Reject |
+| Untrusted iPhone | Reject |
+| Unknown, expired, or consumed challenge | Reject |
+| User cancels authentication | Stop the attempt |
+| Mac disconnected | Return unavailable |
+| System unlock mechanism fails | Return failure |
+| Authorization submitted but response lost | Display outcome unknown and refresh status |
 
-- Password must remain on the Mac.
-- Never transmit it to the iPhone or relay.
-- Never store it in plaintext.
-- Use Keychain access restrictions.
-- Do not log credential contents.
-- Do not use AppleScript, UI automation, synthetic keyboard events, or unsupported password injection as an assumed solution.
-- Document whether Keychain accessibility permits the password to be retrieved while the Mac session is locked.
+Bind signed results to the attempt ID and device identities.
 
-Do not implement this fallback unless both credential accessibility and a supported system authentication path have been demonstrated.
+Never automatically resend an unlock authorization after a timeout.
 
-## 10. Security Threat Model
+A later unlocked status establishes current state; it does not prove which action caused it.
 
-Consider at minimum:
+An accepted request or authorization decision alone is insufficient to report successful unlocking.
 
-- Compromised relay.
-- Stolen iPhone.
-- Stolen or compromised Mac.
-- Replay attacks.
-- Spoofed device identities.
-- Pairing hijacking.
-- Unauthorized device enrollment.
-- Relay message tampering.
-- Session state confusion.
-- Race conditions.
-- Lost connectivity.
-- Malicious repeated unlock requests.
-- Broken authorization-plugin installation.
-- Partial uninstall.
-- macOS updates changing authorization behavior.
+## 11. Trust Revocation
 
-Security controls must fail closed without disabling ordinary local password access.
+Provide a Mac interface for removing trusted iPhones.
 
-## 11. Tests
+When a phone is removed:
 
-### Unit tests
+- Reject subsequent unlock authorizations from its key.
+- Invalidate its outstanding challenges.
+- Update routing authorization when immediate relay-access revocation is required.
 
-- Signature verification.
-- Challenge validation.
-- Request expiration.
-- Nonce uniqueness.
-- Paired-device validation.
-- Revocation.
-- State transitions.
-- Incorrect authentication attempts.
+Incrementing the Mac's routing generation invalidates previous routing grants. Provide replacement grants to remaining trusted phones through an authenticated mechanism.
 
-### Integration tests
+Deleting the iPhone app does not itself revoke trust on Mac.
 
-- iPhone to relay.
-- Relay to Mac.
-- Connection recovery.
-- Offline device handling.
-- Expired command rejection.
-- Concurrent request handling.
+Document recovery when a phone is lost or its keys become unavailable.
 
-### System tests
+## 12. Reconnection and Heartbeats
 
-Test the following on a disposable macOS environment:
+- Use exponential backoff with fresh random jitter.
+- Initial reconnect window: 0–10 seconds.
+- Expand retry windows to 20, 40, then 60 seconds.
+- Reset backoff after a stable connection.
+- Send heartbeats approximately once per minute with staggered timing.
+- Detect and close dead connections.
+- Limit concurrent authentication handshakes and signature checks.
 
-- Lock → remote unlock.
-- Unlock → lock → unlock repeatedly.
-- Incorrect command → remain locked.
-- Relay offline → local password still works.
-- Agent crashed → local password still works.
-- Plugin crashed → local password still works.
-- Network unavailable → local password still works.
-- Plugin uninstall → standard behavior restored.
-- Mac restart → normal login remains functional.
+After reconnecting, refresh state. Never replay an earlier unlock command.
 
-Run physical-device validation before claiming success.
+Test mass reconnection after relay restart.
 
-## 12. Implementation Order
+## 13. Resource Budget
 
-### Milestone 1 — Feasibility
+Target a Linux VPS with 1 vCPU and 1 GB RAM.
 
-- Research macOS authorization.
-- Implement isolated local unlock proof of concept.
-- Validate a real screen unlock.
-- Document risks and compatibility.
-- Decide whether to continue.
+- Run one Go service under systemd.
+- Avoid unnecessary background services.
+- Disable WebSocket compression.
+- Use small buffers and pooled write buffers where appropriate.
+- Bound queues and message sizes.
+- Disconnect slow consumers.
+- Avoid busy polling.
+- Avoid payload and heartbeat logging.
+- Start with default GC behavior and tune from measurements.
+- Evaluate an initial Go soft memory limit around 600 MiB while preserving headroom for the OS and networking.
 
-### Milestone 2 — Secure device communication
+The Go soft memory limit does not cap all process or kernel memory.
 
-- Build the macOS agent.
-- Implement local device identity.
-- Implement signing and verification.
-- Build the Go relay.
-- Establish authenticated internet communication.
-- Test on separate networks.
+### Required measurements
 
-### Milestone 3 — iOS application
+- Process RSS.
+- Total system memory, including socket overhead.
+- Idle CPU.
+- Memory growth per connection.
+- Request latency.
+- TLS handshake load.
+- File descriptor usage.
+- Recovery under connection loss and reconnect storms.
 
-- Build SwiftUI screens.
-- Implement QR pairing.
-- Implement Face ID / Touch ID authorization.
-- Implement signed unlock requests.
-- Implement status updates.
+Test 1,000 and 5,000 real TLS/WebSocket connections using a separate load generator.
 
-### Milestone 4 — System integration
+Five thousand connections is a test target, not a promised capacity.
 
-- Connect the relay command to the proven local unlock mechanism.
-- Implement result verification.
-- Add explicit installation approval.
-- Provide rollback and recovery.
-- Test locked-session behavior.
+## 14. Security Model
 
-### Milestone 5 — Production hardening
+Assume the relay can be compromised.
 
-- Security review.
-- Connection recovery.
-- Logging and observability.
-- Error handling.
-- Code signing and notarization.
-- Installation and update workflows.
-- Compatibility matrix.
+A compromised relay may interrupt service or observe metadata, but must not be able to:
 
-## 13. Acceptance Criteria
+- Add a trusted iPhone.
+- Replace a pinned peer key.
+- Forge an unlock authorization.
+- Successfully replay an authorization.
+- Redirect authorization to a different Mac or action.
+- Forge fresh, verified Mac status.
+- Forge a successful operation result.
 
-The MVP is complete only when:
+Use TLS and signed device messages.
 
-- [ ] iPhone and Mac work from different networks.
-- [ ] No Bluetooth connection is involved.
-- [ ] The Mac does not require an open inbound router port.
-- [ ] The iPhone user authenticates with Face ID (Touch ID on iPhone Duo).
-- [ ] The remote command is cryptographically authenticated.
-- [ ] The relay cannot forge an authorized unlock.
-- [ ] The actual macOS lock screen is dismissed.
-- [ ] The existing desktop session becomes usable.
-- [ ] No macOS password is transmitted.
-- [ ] The Mac can still be unlocked normally using its password.
-- [ ] Failed or interrupted requests cannot unlock the Mac.
-- [ ] Device revocation works.
-- [ ] Agent or relay failures do not block local login.
-- [ ] Installation and removal procedures are documented.
+Signatures authenticate messages; they do not hide payloads from the relay. If payload confidentiality is required, select an established end-to-end encryption scheme rather than inventing one.
 
-## 14. Execution Instructions
+Do not store the following on the relay:
 
-Act as a senior macOS security engineer, iOS engineer, and Go backend engineer.
+- Account passwords.
+- Biometric data.
+- Private keys.
+- Challenge or authorization payloads in logs.
+- IP history in application storage.
 
-Work autonomously and prioritize a functioning, verifiable MVP.
+Review reverse-proxy and infrastructure access logging separately.
 
-Start with Phase 0. Inspect Apple's security architecture, establish an evidence-based technical approach, and implement the smallest possible proof of concept.
+## 15. Implementation Order
 
-Do not assume that a successful authorization callback automatically implies an unlocked macOS session.
+1. Validate the macOS unlock mechanism and recovery path.
+2. Finalize cryptographic formats and pairing protocol.
+3. Implement BLE pairing and protected device storage.
+4. Implement relay connection authentication and routing grants.
+5. Implement signed challenges and authenticated iPhone signing.
+6. Integrate the validated local unlock component.
+7. Implement status and uncertain-outcome handling.
+8. Implement revocation and recovery.
+9. Run protocol, failure-path, and load tests.
+10. Document installation, deployment, and upgrades.
 
-Do not install a custom system authorization mechanism or modify machine-wide authentication policy without explicit permission.
+Do not proceed past the first milestone if safe passwordless session unlocking remains unproven.
 
-Do not bypass SIP or weaken platform security protections.
+## 16. Acceptance Criteria
 
-Do not claim that a remote unlock is working unless it has passed a real system-level test.
+- [ ] Passwordless unlock works on the declared supported macOS version.
+- [ ] Ordinary local unlock works when Wakeveil is unavailable or crashes.
+- [ ] Installation, removal, and recovery are documented and tested.
+- [ ] BLE pairing works without internet.
+- [ ] Mismatched verification codes abort pairing.
+- [ ] Peer keys are persisted only after successful pairing.
+- [ ] Device trust survives application and relay restarts.
+- [ ] Unlock signing requires system-enforced user authentication.
+- [ ] Forged, wrong-device, expired, and replayed authorizations are rejected.
+- [ ] Concurrent copies cause at most one unlock execution attempt.
+- [ ] Removing a trusted phone prevents further unlock authorization.
+- [ ] Relay compromise cannot establish new device trust.
+- [ ] Status distinguishes unavailable from unknown.
+- [ ] Lost responses produce an uncertain outcome instead of false success.
+- [ ] Unlock authorizations are never automatically retried.
+- [ ] Relay restart requires no manual pairing.
+- [ ] Requests, queues, challenges, and replay state remain bounded.
+- [ ] Capacity and reconnection behavior are documented from measurements.
 
-Once feasibility is established, build the remaining components in the specified milestone order.
+## Deliverables
 
-Prefer straightforward implementations over unnecessary abstractions.
+- macOS feasibility prototype and compatibility report.
+- Swift iOS application.
+- Swift macOS agent and validated authorization integration.
+- Go relay service.
+- Wire protocol and cryptographic format documentation.
+- Device trust and threat model documentation.
+- Automated protocol and failure-path tests.
+- VPS deployment and upgrade instructions.
+- macOS installation, uninstall, and recovery instructions.
+- Load-test scripts and measured resource-use report.
 
-Maintain clear technical documentation and automated tests.
+## First Action for the Implementation Agent
 
-If blocked by macOS platform restrictions, report the exact limitation, supporting evidence, and the simplest technically viable alternative.
+Start with the isolated macOS unlocking proof of concept.
 
-The primary success metric is a real, secure, remotely triggered macOS screen unlock — not merely successful network communication.
+Report the supported macOS version, tested mechanism, observed limitations, recovery procedure, and evidence that ordinary password unlock remains functional before implementing the rest of the product.
